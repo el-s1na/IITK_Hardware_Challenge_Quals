@@ -4,47 +4,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 CSV_FILE = "Round10_traces.csv"
 
-# Trace counts used for characterization.
-# IMPORTANT:
-# Every one of these N values is now evaluated over ALL 200
-# samples, not just samples 49..50.
-# TRACE_COUNTS = [
-#   250,
-#   500,
-#   750,
-#   1000,
-#   1250,
-#   1500,
-#   1750,
-#   2000,
-#   2500,
-#   3000,
-#   3500,
-#   4000,
-#   5000,
-#   7500,
-#   10000,
-#   15000,
-#   20000,
-#   50000,
-#   100000,
-# ]
 TRACE_COUNTS = list(range(250, 3001))
-# TRACE_COUNTS = list(range(1972, 2200))
 
-
-# Randomization makes the trace-count experiment reproducible.
-# N traces are selected as the first N traces of this fixed
-# random permutation.
 RANDOM_SEED = 0x5CA
 
-# Output directories/files
 FULL_PLOT_DIR = "correlation_plots_full"
 TRACE_CHAR_CSV = "trace_characterisation.csv"
 RANK_PLOT = "rank_plot_all_bytes.png"
@@ -52,10 +17,6 @@ WORST_RANK_PLOT = "worst_rank_plot.png"
 
 os.makedirs(FULL_PLOT_DIR, exist_ok=True)
 
-
-# ============================================================
-# AES INVERSE S-BOX
-# ============================================================
 
 AES_INV_SBOX = np.array(
   [
@@ -320,35 +281,8 @@ AES_INV_SBOX = np.array(
 )
 
 
-# ============================================================
-# HAMMING WEIGHT TABLE
-# ============================================================
-
 HW = np.array([bin(x).count("1") for x in range(256)], dtype=np.uint8)
 
-
-# ============================================================
-# AES BYTE MAPPING
-# ============================================================
-#
-# This is the same mapping used in the previous successful
-# fake-key recovery script.
-#
-# The challenge defines:
-#
-#   HD_i[k] =
-#       HW(
-#          InvSBox[C[i] xor k]
-#          xor C[INV_SR[i]]
-#       )
-#
-# IMPORTANT:
-# Keep this mapping unchanged because the earlier attack
-# converged to:
-#
-#   91DEC068E3FACE4599CE38F420863A30
-#
-# ============================================================
 
 INV_SR = np.array(
   [0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11], dtype=np.int64
@@ -357,48 +291,23 @@ INV_SR = np.array(
 
 def load_data(filename):
 
-  print(f"[+] Loading {filename} ...")
 
   df = pd.read_csv(filename, header=None)
 
-  print(f"[+] Raw CSV shape: {df.shape}")
+  print(f"Raw CSV shape: {df.shape}")
 
-  if df.shape[1] != 201:
-    raise ValueError(f"Expected 201 columns, got {df.shape[1]}")
-
-  # ========================================================
-  # Column 0 = ciphertext
-  #
-  # The CSV may contain ciphertext as:
-  #
-  #   1. hexadecimal strings
-  #   2. bytes objects
-  #
-  # Handle both cases.
-  # ========================================================
 
   ciphertext_column = df.iloc[:, 0].to_numpy()
 
   ciphertext_list = []
 
   for x in ciphertext_column:
-    # -----------------------------------------------
-    # Case 1: already bytes
-    # -----------------------------------------------
 
     if isinstance(x, bytes):
       raw = x
 
-    # -----------------------------------------------
-    # Case 2: Python bytearray
-    # -----------------------------------------------
-
     elif isinstance(x, bytearray):
       raw = bytes(x)
-
-    # -----------------------------------------------
-    # Case 3: hexadecimal string
-    # -----------------------------------------------
 
     elif isinstance(x, str):
       x = x.strip()
@@ -409,25 +318,11 @@ def load_data(filename):
       except ValueError as e:
         raise ValueError(f"Could not parse ciphertext value: {repr(x)}") from e
 
-    else:
-      raise TypeError(f"Unexpected ciphertext type: {type(x)} value={repr(x)}")
-
-    # -----------------------------------------------
-    # AES ciphertext must be exactly 16 bytes
-    # -----------------------------------------------
-
-    if len(raw) != 16:
-      raise ValueError(
-        f"Expected 16-byte ciphertext, got {len(raw)} bytes: {repr(raw)}"
-      )
 
     ciphertext_list.append(raw)
 
   ciphertexts = np.frombuffer(b"".join(ciphertext_list), dtype=np.uint8).reshape(-1, 16)
 
-  # ========================================================
-  # Columns 1..200 = power traces
-  # ========================================================
 
   traces = df.iloc[:, 1:].to_numpy(dtype=np.float32)
 
@@ -435,22 +330,11 @@ def load_data(filename):
 
   print(f"[+] Traces shape:      {traces.shape}")
 
-  if ciphertexts.shape[1] != 16:
-    raise ValueError(f"Expected 16 ciphertext bytes, got {ciphertexts.shape[1]}")
-
-  if traces.shape[1] != 200:
-    raise ValueError(f"Expected 200 trace samples, got {traces.shape[1]}")
 
   print()
   print(f"[+] Total traces loaded: {len(traces)}")
-  print()
 
   return ciphertexts, traces
-
-
-# ============================================================
-# BUILD HYPOTHESIS MATRIX
-# ============================================================
 
 
 def build_hypothesis(ciphertexts, byte_index):
@@ -472,46 +356,20 @@ def build_hypothesis(ciphertexts, byte_index):
 
   candidates = np.arange(256, dtype=np.uint8)
 
-  # --------------------------------------------------------
-  # C[i] for every trace
-  # --------------------------------------------------------
 
   c_i = ciphertexts[:, byte_index]
 
-  # Shape:
-  #
-  #   (N,1) xor (256,)
-  #
-  # gives:
-  #
-  #   (N,256)
-  #
   x = np.bitwise_xor(c_i[:, None], candidates[None, :])
 
-  # --------------------------------------------------------
-  # InvSBox[C[i] xor k]
-  # --------------------------------------------------------
 
   inv_sbox_value = AES_INV_SBOX[x]
 
-  # --------------------------------------------------------
-  # C[INV_SR[i]]
-  # --------------------------------------------------------
-
   reference_byte = ciphertexts[:, INV_SR[byte_index]]
 
-  # --------------------------------------------------------
-  # HD hypothesis
-  # --------------------------------------------------------
 
   h = HW[np.bitwise_xor(inv_sbox_value, reference_byte[:, None])]
 
   return h.astype(np.float32)
-
-
-# ============================================================
-# CPA
-# ============================================================
 
 
 def calculate_cpa_scores(ciphertexts, traces, byte_index):
@@ -529,18 +387,7 @@ def calculate_cpa_scores(ciphertexts, traces, byte_index):
 
   n = len(traces)
 
-  if n < 2:
-    raise ValueError("Need at least two traces.")
-
-  # --------------------------------------------------------
-  # Build hypothesis
-  # --------------------------------------------------------
-
   hypothesis = build_hypothesis(ciphertexts, byte_index)
-
-  # --------------------------------------------------------
-  # Trace statistics
-  # --------------------------------------------------------
 
   traces = np.asarray(traces, dtype=np.float32)
 
@@ -548,62 +395,32 @@ def calculate_cpa_scores(ciphertexts, traces, byte_index):
 
   sum_t2 = np.sum(traces * traces, axis=0, dtype=np.float64)
 
-  # --------------------------------------------------------
-  # Hypothesis statistics
-  # --------------------------------------------------------
 
   sum_h = hypothesis.sum(axis=0, dtype=np.float64)
 
   sum_h2 = np.sum(hypothesis * hypothesis, axis=0, dtype=np.float64)
 
-  # --------------------------------------------------------
-  # Cross-product:
-  #
-  #      H^T T
-  #
-  # Result:
-  #
-  #      256 x 200
-  # --------------------------------------------------------
-
   cross = hypothesis.T @ traces
 
   cross = cross.astype(np.float64, copy=False)
 
-  # --------------------------------------------------------
-  # Covariance numerator:
-  #
-  # sum(H*T) - sum(H)sum(T)/N
-  # --------------------------------------------------------
 
   covariance = cross - np.outer(sum_h, sum_t) / n
 
-  # --------------------------------------------------------
-  # Variance terms
-  # --------------------------------------------------------
 
   var_h = sum_h2 - (sum_h * sum_h) / n
 
   var_t = sum_t2 - (sum_t * sum_t) / n
 
-  # Numerical safety
   var_h = np.maximum(var_h, 1e-15)
 
   var_t = np.maximum(var_t, 1e-15)
 
-  # --------------------------------------------------------
-  # Pearson correlation
-  # --------------------------------------------------------
 
   denominator = np.sqrt(var_h[:, None] * var_t[None, :])
 
   correlations = covariance / denominator
 
-  # --------------------------------------------------------
-  # Score for candidate k:
-  #
-  #      max_t |rho(k,t)|
-  # --------------------------------------------------------
 
   absolute_corr = np.abs(correlations)
 
@@ -612,11 +429,6 @@ def calculate_cpa_scores(ciphertexts, traces, byte_index):
   peak_samples = absolute_corr.argmax(axis=1)
 
   return (correlations, scores, peak_samples)
-
-
-# ============================================================
-# PRINT TOP CANDIDATES
-# ============================================================
 
 
 def print_top_candidates(scores, peak_samples, number=5):
@@ -633,18 +445,9 @@ def print_top_candidates(scores, peak_samples, number=5):
       f"sample={peak_samples[candidate]}"
     )
 
-
-# ============================================================
-# FULL-DATA CPA
-# ============================================================
-
-
 def full_data_attack(ciphertexts, traces):
 
-  print("=" * 70)
   print("FULL-DATA FINAL-ROUND CPA")
-  print("=" * 70)
-  print()
 
   recovered_key = []
 
@@ -653,7 +456,7 @@ def full_data_attack(ciphertexts, traces):
   all_peaks = []
 
   for byte_index in range(16):
-    print(f"[+] Attacking byte {byte_index}")
+    print(f"byte {byte_index}")
 
     (correlations, scores, peak_samples) = calculate_cpa_scores(
       ciphertexts, traces, byte_index
@@ -673,9 +476,6 @@ def full_data_attack(ciphertexts, traces):
 
     print_top_candidates(scores, peak_samples)
 
-    # ----------------------------------------------------
-    # Save full correlation plot
-    # ----------------------------------------------------
 
     plt.figure(figsize=(12, 6))
 
@@ -685,7 +485,6 @@ def full_data_attack(ciphertexts, traces):
 
       plt.plot(np.abs(correlations[candidate]), linewidth=0.7, alpha=0.25)
 
-    # Highlight winning candidate
     plt.plot(
       np.abs(correlations[winner]), linewidth=2.2, label=f"Winner 0x{winner:02X}"
     )
@@ -725,16 +524,9 @@ def full_data_attack(ciphertexts, traces):
   return (recovered_key, all_correlations, np.array(all_scores), np.array(all_peaks))
 
 
-# ============================================================
-# TRACE-COUNT ATTACK
-# ============================================================
-
-
 def characterize_trace_count(ciphertexts, traces, reference_key):
 
-  print("=" * 70)
   print("TRACE-COUNT CHARACTERISATION")
-  print("=" * 70)
   print()
 
   print("[+] IMPORTANT: Each trace count below uses ALL 200 samples.")
@@ -743,9 +535,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   n_total = len(traces)
 
-  # --------------------------------------------------------
-  # Deterministic random permutation
-  # --------------------------------------------------------
 
   rng = np.random.default_rng(RANDOM_SEED)
 
@@ -765,15 +554,11 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   consecutive_full_recovery = 0
 
-  # --------------------------------------------------------
-  # Check only N values which exist
-  # --------------------------------------------------------
 
   valid_trace_counts = [n for n in TRACE_COUNTS if n <= n_total]
 
   for N in valid_trace_counts:
-    print("=" * 50)
-    print(f"[+] Characterising N = {N}")
+    print(f"Characterising N = {N}")
 
     ct_N = shuffled_ciphertexts[:N]
 
@@ -784,10 +569,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
     ranks = np.zeros(16, dtype=np.int32)
 
     candidate_scores = np.zeros((16, 256), dtype=np.float64)
-
-    # ----------------------------------------------------
-    # Attack all 16 bytes
-    # ----------------------------------------------------
 
     for byte_index in range(16):
       (_correlations, scores, _peak_samples) = calculate_cpa_scores(
@@ -800,16 +581,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
       winners[byte_index] = winner
 
-      # ------------------------------------------------
-      # Rank of the reference key byte
-      #
-      # Rank 1 = best
-      #
-      # Rank =
-      #
-      #   1 + number of candidates
-      #       with a strictly larger score
-      # ------------------------------------------------
 
       reference_byte = int(reference_key[byte_index])
 
@@ -818,10 +589,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
       rank = 1 + int(np.count_nonzero(scores > reference_score))
 
       ranks[byte_index] = rank
-
-    # ----------------------------------------------------
-    # Full recovery criterion
-    # ----------------------------------------------------
 
     worst_rank = int(np.max(ranks))
 
@@ -835,19 +602,14 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
     print(f"    Full recovery = {full_recovery}")
 
-    # ----------------------------------------------------
-    # Save result
-    # ----------------------------------------------------
-
     results.append({"N": N, "worst_rank": worst_rank, "full_recovery": full_recovery})
 
     rank_matrix.append(ranks.copy())
 
     winner_matrix.append(winners.copy())
 
-    # ----------------------------------------------------
+
     # Stop after 50 consecutive full-recovery points
-    # ----------------------------------------------------
 
     if full_recovery:
       consecutive_full_recovery += 1
@@ -855,15 +617,12 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
         first_full_recovery = N
       print(f"[+] Worst rank reached 1 at N = {N} traces")
       print(f"[+] Recovered key at this trace count: {winner_hex}")
-      if consecutive_full_recovery == 50:
-        print("[+] Worst rank was 1 for 50 consecutive trace counts; stopping sweep.")
+      if consecutive_full_recovery == 100:
+        print("[+] Worst rank was 1 for 100 consecutive trace counts; stopping sweep.")
         break
     else:
       consecutive_full_recovery = 0
 
-  # ========================================================
-  # Convert results
-  # ========================================================
 
   results_df = pd.DataFrame(results)
 
@@ -871,18 +630,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   winner_matrix = np.array(winner_matrix)
 
-  # ========================================================
-  # STABLE FULL RECOVERY
-  # ========================================================
-  #
-  # Stable means:
-  #
-  #   from this tested N onward,
-  #   every tested N also has WorstRank == 1
-  #
-  # This is deliberately based only on the tested
-  # trace-count values.
-  # ========================================================
 
   stable_full_recovery = None
 
@@ -893,14 +640,9 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
       stable_full_recovery = int(results_df.iloc[i]["N"])
       break
 
-  # ========================================================
-  # PRINT SUMMARY TABLE
-  # ========================================================
 
   print()
-  print("=" * 70)
   print("TRACE COUNT / RANK RESULTS")
-  print("=" * 70)
 
   print(results_df.to_string(index=False))
 
@@ -918,17 +660,10 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
   else:
     print("[!] No stable full recovery among tested trace counts.")
 
-  # ========================================================
-  # SAVE CSV
-  # ========================================================
-
   results_df.to_csv(TRACE_CHAR_CSV, index=False)
 
   print(f"[+] Saved {TRACE_CHAR_CSV}")
 
-  # ========================================================
-  # RANK PLOT: ALL BYTES
-  # ========================================================
 
   plt.figure(figsize=(12, 7))
 
@@ -965,10 +700,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
   plt.close()
 
   print(f"[+] Saved {RANK_PLOT}")
-
-  # ========================================================
-  # WORST-RANK PLOT
-  # ========================================================
 
   plt.figure(figsize=(10, 6))
 
@@ -1008,107 +739,11 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
     stable_full_recovery,
   )
 
-
-# ============================================================
-# FINAL VERIFICATION
-# ============================================================
-
-
-def full_200_sample_verification(ciphertexts, traces, reference_key, verification_N):
-
-  print()
-  print("=" * 70)
-  print(f"FULL 200-SAMPLE VERIFICATION AT N = {verification_N}")
-  print("=" * 70)
-
-  # --------------------------------------------------------
-  # Use the SAME deterministic shuffled traces used in
-  # characterization.
-  # --------------------------------------------------------
-
-  rng = np.random.default_rng(RANDOM_SEED)
-
-  permutation = rng.permutation(len(traces))
-
-  ct_N = ciphertexts[permutation[:verification_N]]
-
-  traces_N = traces[permutation[:verification_N]]
-
-  verified_key = []
-
-  mismatches = []
-
-  for byte_index in range(16):
-    (_correlations, scores, peak_samples) = calculate_cpa_scores(
-      ct_N, traces_N, byte_index
-    )
-
-    winner = int(np.argmax(scores))
-
-    reference = int(reference_key[byte_index])
-
-    peak = float(scores[winner])
-
-    sample = int(peak_samples[winner])
-
-    verified_key.append(winner)
-
-    status = "OK" if winner == reference else "MISMATCH"
-
-    if winner != reference:
-      mismatches.append(byte_index)
-
-    print(
-      f"byte {byte_index:02d}: "
-      f"reference=0x{reference:02X}, "
-      f"winner=0x{winner:02X}, "
-      f"peak={peak:.6f}, "
-      f"sample={sample}, "
-      f"{status}"
-    )
-
-  verified_key = np.array(verified_key, dtype=np.uint8)
-
-  reference_hex = "".join(f"{x:02X}" for x in reference_key)
-
-  verified_hex = "".join(f"{x:02X}" for x in verified_key)
-
-  print()
-  print(f"Reference key : {reference_hex}")
-
-  print(f"Verified key  : {verified_hex}")
-
-  if len(mismatches) == 0:
-    print()
-    print("[+] GLOBAL VERIFICATION PASSED")
-
-    return True
-
-  else:
-    print()
-    print("[!] GLOBAL VERIFICATION FAILED")
-
-    print(f"[!] Mismatching bytes: {mismatches}")
-
-    return False
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-
 def main():
 
-  # --------------------------------------------------------
-  # Load traces
-  # --------------------------------------------------------
 
   ciphertexts, traces = load_data(CSV_FILE)
 
-  # --------------------------------------------------------
-  # FULL DATA CPA
-  # --------------------------------------------------------
 
   (reference_key, all_correlations, all_scores, all_peaks) = full_data_attack(
     ciphertexts, traces
@@ -1116,18 +751,11 @@ def main():
 
   reference_hex = "".join(f"{x:02X}" for x in reference_key)
 
-  print("=" * 70)
   print("REFERENCE FAKE ROUND-10 KEY")
-  print("=" * 70)
 
   print(reference_hex)
 
-  print("=" * 70)
-  print()
 
-  # --------------------------------------------------------
-  # TRACE COUNT CHARACTERIZATION
-  # --------------------------------------------------------
 
   (
     results_df,
@@ -1137,33 +765,9 @@ def main():
     stable_full_recovery,
   ) = characterize_trace_count(ciphertexts, traces, reference_key)
 
-  # --------------------------------------------------------
-  # Choose verification N
-  #
-  # We verify at the first full-recovery point if one exists.
-  # This directly tests whether that reported threshold also
-  # works under the exact same ALL-200-sample CPA.
-  # --------------------------------------------------------
 
-  verification_N = first_full_recovery
-
-  global_verification = False
-
-  if verification_N is not None:
-    global_verification = full_200_sample_verification(
-      ciphertexts, traces, reference_key, verification_N
-    )
-
-  # --------------------------------------------------------
-  # FINAL SUMMARY
-  # --------------------------------------------------------
-
-  print()
-  print("=" * 70)
   print("FINAL SUMMARY")
-  print("=" * 70)
 
-  print()
   print("Reference fake key:")
 
   print(f"    {reference_hex}")
@@ -1187,24 +791,6 @@ def main():
     print("Stable full-recovery N:")
 
     print("    NONE")
-
-  if verification_N is not None:
-    print(f"Verification N:")
-
-    print(f"    {verification_N}")
-
-    print("Global verification:")
-
-    print(f"    {'PASSED' if global_verification else 'FAILED'}")
-
-  else:
-    print("Verification N:")
-
-    print("    NONE")
-
-    print("Global verification:")
-
-    print("    NOT RUN")
 
   print()
   print("Output files:")
