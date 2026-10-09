@@ -297,31 +297,10 @@ def load_data(filename):
   print(f"Raw CSV shape: {df.shape}")
 
 
-  ciphertext_column = df.iloc[:, 0].to_numpy()
-
-  ciphertext_list = []
-
-  for x in ciphertext_column:
-
-    if isinstance(x, bytes):
-      raw = x
-
-    elif isinstance(x, bytearray):
-      raw = bytes(x)
-
-    elif isinstance(x, str):
-      x = x.strip()
-
-      try:
-        raw = bytes.fromhex(x)
-
-      except ValueError as e:
-        raise ValueError(f"Could not parse ciphertext value: {repr(x)}") from e
-
-
-    ciphertext_list.append(raw)
-
-  ciphertexts = np.frombuffer(b"".join(ciphertext_list), dtype=np.uint8).reshape(-1, 16)
+  ciphertexts = np.frombuffer(
+    b"".join(bytes.fromhex(value.strip()) for value in df.iloc[:, 0]),
+    dtype=np.uint8,
+  ).reshape(-1, 16)
 
 
   traces = df.iloc[:, 1:].to_numpy(dtype=np.float32)
@@ -431,29 +410,11 @@ def calculate_cpa_scores(ciphertexts, traces, byte_index):
   return (correlations, scores, peak_samples)
 
 
-def print_top_candidates(scores, peak_samples, number=5):
-
-  order = np.argsort(scores)[::-1]
-
-  print("    Top candidates:")
-
-  for rank, candidate in enumerate(order[:number], start=1):
-    print(
-      f"      #{rank}: "
-      f"0x{candidate:02X} "
-      f"|corr|={scores[candidate]:.6f} "
-      f"sample={peak_samples[candidate]}"
-    )
-
 def full_data_attack(ciphertexts, traces):
 
   print("FULL-DATA FINAL-ROUND CPA")
 
   recovered_key = []
-
-  all_correlations = []
-  all_scores = []
-  all_peaks = []
 
   for byte_index in range(16):
     print(f"byte {byte_index}")
@@ -473,9 +434,6 @@ def full_data_attack(ciphertexts, traces):
     print(f"    Peak sample  : {peak_sample}")
 
     print(f"    Peak |corr|  : {peak_corr:.6f}")
-
-    print_top_candidates(scores, peak_samples)
-
 
     plt.figure(figsize=(12, 6))
 
@@ -513,15 +471,8 @@ def full_data_attack(ciphertexts, traces):
 
     recovered_key.append(winner)
 
-    all_correlations.append(correlations)
-
-    all_scores.append(scores)
-
-    all_peaks.append(peak_samples)
-
   recovered_key = np.array(recovered_key, dtype=np.uint8)
-
-  return (recovered_key, all_correlations, np.array(all_scores), np.array(all_peaks))
+  return recovered_key
 
 
 def characterize_trace_count(ciphertexts, traces, reference_key):
@@ -535,7 +486,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   n_total = len(traces)
 
-
   rng = np.random.default_rng(RANDOM_SEED)
 
   permutation = rng.permutation(n_total)
@@ -548,39 +498,24 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   rank_matrix = []
 
-  winner_matrix = []
-
   first_full_recovery = None
 
   consecutive_full_recovery = 0
 
 
-  valid_trace_counts = [n for n in TRACE_COUNTS if n <= n_total]
+  stable_full_recovery = None
 
-  for N in valid_trace_counts:
-    print(f"Characterising N = {N}")
-
+  for N in TRACE_COUNTS:
     ct_N = shuffled_ciphertexts[:N]
 
     traces_N = shuffled_traces[:N]
 
-    winners = np.zeros(16, dtype=np.uint8)
-
     ranks = np.zeros(16, dtype=np.int32)
-
-    candidate_scores = np.zeros((16, 256), dtype=np.float64)
 
     for byte_index in range(16):
       (_correlations, scores, _peak_samples) = calculate_cpa_scores(
         ct_N, traces_N, byte_index
       )
-
-      candidate_scores[byte_index] = scores
-
-      winner = int(np.argmax(scores))
-
-      winners[byte_index] = winner
-
 
       reference_byte = int(reference_key[byte_index])
 
@@ -594,30 +529,19 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
     full_recovery = worst_rank == 1
 
-    winner_hex = "".join(f"{x:02X}" for x in winners)
-
-    print(f"    Winner = {winner_hex}")
-
-    print(f"    Worst rank = {worst_rank}")
-
-    print(f"    Full recovery = {full_recovery}")
-
     results.append({"N": N, "worst_rank": worst_rank, "full_recovery": full_recovery})
 
     rank_matrix.append(ranks.copy())
 
-    winner_matrix.append(winners.copy())
 
-
-    # Stop after 50 consecutive full-recovery points
+    # Stop after 100 consecutive full-recovery points
 
     if full_recovery:
       consecutive_full_recovery += 1
       if first_full_recovery is None:
         first_full_recovery = N
-      print(f"[+] Worst rank reached 1 at N = {N} traces")
-      print(f"[+] Recovered key at this trace count: {winner_hex}")
       if consecutive_full_recovery == 100:
+        stable_full_recovery = N - 99
         print("[+] Worst rank was 1 for 100 consecutive trace counts; stopping sweep.")
         break
     else:
@@ -628,37 +552,6 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   rank_matrix = np.array(rank_matrix)
 
-  winner_matrix = np.array(winner_matrix)
-
-
-  stable_full_recovery = None
-
-  for i in range(len(results_df)):
-    remaining = results_df.iloc[i:]
-
-    if np.all(remaining["full_recovery"].to_numpy()):
-      stable_full_recovery = int(results_df.iloc[i]["N"])
-      break
-
-
-  print()
-  print("TRACE COUNT / RANK RESULTS")
-
-  print(results_df.to_string(index=False))
-
-  print()
-
-  if first_full_recovery is not None:
-    print(f"[+] First full-recovery among tested N: {first_full_recovery} traces")
-
-  else:
-    print("[!] No full recovery among tested trace counts.")
-
-  if stable_full_recovery is not None:
-    print(f"[+] Stable full-recovery among tested N: {stable_full_recovery} traces")
-
-  else:
-    print("[!] No stable full recovery among tested trace counts.")
 
   results_df.to_csv(TRACE_CHAR_CSV, index=False)
 
@@ -731,13 +624,7 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   print(f"[+] Saved {WORST_RANK_PLOT}")
 
-  return (
-    results_df,
-    rank_matrix,
-    winner_matrix,
-    first_full_recovery,
-    stable_full_recovery,
-  )
+  return first_full_recovery, stable_full_recovery
 
 def main():
 
@@ -745,9 +632,7 @@ def main():
   ciphertexts, traces = load_data(CSV_FILE)
 
 
-  (reference_key, all_correlations, all_scores, all_peaks) = full_data_attack(
-    ciphertexts, traces
-  )
+  reference_key = full_data_attack(ciphertexts, traces)
 
   reference_hex = "".join(f"{x:02X}" for x in reference_key)
 
@@ -757,20 +642,12 @@ def main():
 
 
 
-  (
-    results_df,
-    rank_matrix,
-    winner_matrix,
-    first_full_recovery,
-    stable_full_recovery,
-  ) = characterize_trace_count(ciphertexts, traces, reference_key)
+  first_full_recovery, stable_full_recovery = characterize_trace_count(
+    ciphertexts, traces, reference_key
+  )
 
 
   print("FINAL SUMMARY")
-
-  print("Reference fake key:")
-
-  print(f"    {reference_hex}")
 
   if first_full_recovery is not None:
     print(f"First full-recovery N (all 200 samples):")

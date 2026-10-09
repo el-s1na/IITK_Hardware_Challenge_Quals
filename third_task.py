@@ -6,7 +6,7 @@ guesses or a preset sample spacing. It then scans all missing-endpoint key
 candidates using transition HD, HW(S[r-1] XOR S[r]), at those detected samples.
 The result assumes the ten strongest local variance peaks correspond to AES
 round events and depends on the shared missing-endpoint and leakage hypotheses.
-Run fourth_task.py with the printed RK10 to derive the master key.
+The recovered RK10 is used directly by fourth_task.py.
 """
 from pathlib import Path
 import numpy as np
@@ -169,77 +169,46 @@ def fit_gain(htr, ytr, hte, yte):
             float((ytec * ytec).sum()))
 
 
-def correlation_by_sample(features, traces):
-    """Pearson correlation of each byte feature with every trace sample."""
-    features = features - features.mean(axis=0)
-    traces = traces - traces.mean(axis=0)
-    numerator = features.T @ traces
-    denominator = np.sqrt(
-        (features * features).sum(axis=0)[:, None]
-        * (traces * traces).sum(axis=0)[None, :]
-    )
-    return numerator / np.maximum(denominator, 1e-20)
-
-
-def save_round_key_correlation_plots(root, rk10, ciphertexts, traces,
-                                     heldout_folds, event_samples):
-    """Save one actual-key transition-correlation plot per RK10 byte."""
-    master = invert_aes128_rk10(rk10.tobytes())
-    round_keys = [np.frombuffer(key, dtype=np.uint8)
-                  for key in expand_aes128(master)]
-    s9, s8 = invert_to_round8(ciphertexts, round_keys[10], round_keys[9])
-    states = {9: s9, 8: s8}
-    for round_number in range(8, 0, -1):
-        states[round_number - 1] = inverse_round(
-            states[round_number], round_keys[round_number]
-        )
-
-    correlations = {}
-    for fold_number, heldout in enumerate(heldout_folds, 1):
-        fold_correlations = []
-        for round_number in range(1, 9):
-            feature = HW[states[round_number - 1][heldout]
-                         ^ states[round_number][heldout]]
-            fold_correlations.append(
-                correlation_by_sample(feature, traces[heldout])
-            )
-        correlations[fold_number] = np.stack(fold_correlations)
-
+def save_endpoint_correlation_plots(root, correlations, rk10, event_samples,
+                                    selected_z):
+    """Plot all candidate correlations over every sample, grouped by byte/round."""
     output_dir = root / "actual_round10_correlation_plots"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    sample_indices = np.arange(traces.shape[1])
+    output_dir.mkdir(exist_ok=True)
+    sample_indices = np.arange(correlations.shape[-1])
     for byte in range(16):
-        fig, axes = plt.subplots(4, 2, figsize=(13, 12), sharex=True, sharey=True)
-        for round_number, axis in enumerate(axes.flat, 1):
-            for fold_number, style in ((1, "-"), (2, "--")):
-                axis.plot(
-                    sample_indices,
-                    correlations[fold_number][round_number - 1, byte],
-                    linestyle=style,
-                    linewidth=0.9,
-                    label=f"held-out fold {fold_number}",
-                )
-            axis.axvline(event_samples[0][round_number - 1],
-                         color="black", alpha=0.35, linewidth=0.8)
-            axis.axvline(event_samples[1][round_number - 1],
-                         color="black", alpha=0.35, linewidth=0.8,
-                         linestyle=":")
-            axis.axhline(0, color="gray", linewidth=0.6)
-            axis.set_title(f"Round {round_number}, event sample "
-                           f"{event_samples[0][round_number - 1]}")
+        fig, axes = plt.subplots(4, 2, figsize=(15, 12), sharex=True, sharey=True)
+        for round_index, axis in enumerate(axes.flat):
+            for z in range(256):
+                if z == selected_z:
+                    continue
+                axis.plot(sample_indices, correlations[z, round_index, byte],
+                          color="gray", alpha=0.12, linewidth=0.45)
+            axis.plot(
+                sample_indices, correlations[selected_z, round_index, byte],
+                color="crimson", linewidth=1.5,
+                label=f"z=0x{selected_z:02x} (selected)",
+            )
+            axis.axvline(event_samples[round_index], color="black",
+                         alpha=0.45, linewidth=0.8, linestyle="--")
+            axis.axhline(0, color="black", linewidth=0.5)
+            axis.set_title(
+                f"Round {round_index + 1}, event sample {event_samples[round_index]}"
+            )
             axis.set_ylabel("Pearson r")
             axis.grid(alpha=0.2)
         for axis in axes[-1, :]:
             axis.set_xlabel("Trace sample")
         axes[0, 0].legend(fontsize=8)
         fig.suptitle(
-            f"Actual RK10 transition-HW correlations — byte {byte:02d} "
-            f"(RK10 byte 0x{rk10[byte]:02x})"
+            f"Endpoint candidates across rounds 1–8 — byte {byte:02d} "
+            f"(RK10=0x{rk10[byte]:02x})\n"
+            "Gray: other z candidates; red: selected global regression candidate"
         )
-        fig.tight_layout(rect=(0, 0, 1, 0.97))
-        fig.savefig(output_dir / f"byte_{byte:02d}.png", dpi=150)
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        output_path = output_dir / f"byte_{byte:02d}.png"
+        fig.savefig(output_path, dpi=150)
         plt.close(fig)
-    print(f"Saved 16 actual-RK10 correlation plots to {output_dir}")
+    print(f"Saved all-candidate round correlation plots to {output_dir}")
 
 
 def load_capture(root):
@@ -276,8 +245,10 @@ def main():
     row_ids = np.flatnonzero(keep)
     ct, traces = ct_all[keep], tr_all[keep]
     training_winners = []
-    heldout_folds = []
     event_samples = []
+    endpoint_correlations = np.empty((256, 8, 16, traces.shape[1]), dtype=np.float32)
+    centered_traces = traces - traces.mean(axis=0)
+    trace_sumsquares = (centered_traces * centered_traces).sum(axis=0)
     for fold, train_first in enumerate((True, False), 1):
         train = np.flatnonzero((row_ids < 50_000) == train_first)
         test = np.flatnonzero((row_ids < 50_000) != train_first)
@@ -291,7 +262,6 @@ def main():
         # The first nine detected events are ordinary rounds 1..9. The tenth
         # is the protected final round, excluded from the ordinary-round HD fit.
         round_samples = activity_samples[:9]
-        heldout_folds.append(test)
         event_samples.append(round_samples[:8])
         candidate_results = []
         for m in range(256):
@@ -312,6 +282,15 @@ def main():
                     h[train], y[train], h[test], y[test]
                 )
                 round_scores.append((gt, ge, et, ee, sample))
+                if fold == 1 and r <= 8:
+                    h_centered = h - h.mean(axis=0)
+                    denominator = np.sqrt(
+                        (h_centered * h_centered).sum(axis=0)[:, None]
+                        * trace_sumsquares[None, :]
+                    )
+                    endpoint_correlations[m, r - 1] = (
+                        h_centered.T @ centered_traces
+                    ) / np.maximum(denominator, 1e-20)
             train8 = sum(a * et for a, _, et, _, _ in round_scores[:8]) / sum(
                 et for _, _, et, _, _ in round_scores[:8])
             test8 = sum(b * ee for _, b, _, ee, _ in round_scores[:8]) / sum(
@@ -346,11 +325,11 @@ def main():
         print("Task 3 candidate agreed across both training halves:")
         print(f"  z_missing=0x{selected_z:02x}")
         print(f"  actual RK10 candidate={selected_rk10.tobytes().hex()}")
-        save_round_key_correlation_plots(
-            root, selected_rk10, ct, traces, heldout_folds, event_samples
+        save_endpoint_correlation_plots(
+            root, endpoint_correlations, selected_rk10, event_samples[0],
+            selected_z
         )
-        print("Task 4 next step:")
-        print(f"  python fourth_task.py {selected_rk10.tobytes().hex()}")
+        print("Task 4: run python fourth_task.py")
     else:
         print("Task 3 has no single candidate agreed by both training halves; "
               "do not promote a round-10 key to Task 4 yet.")
