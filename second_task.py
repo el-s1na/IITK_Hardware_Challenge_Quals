@@ -14,27 +14,30 @@ CSV_FILE = "Round10_traces.csv"
 # IMPORTANT:
 # Every one of these N values is now evaluated over ALL 200
 # samples, not just samples 49..50.
-TRACE_COUNTS = [
-  250,
-  500,
-  750,
-  1000,
-  1250,
-  1500,
-  1750,
-  2000,
-  2500,
-  3000,
-  3500,
-  4000,
-  5000,
-  7500,
-  10000,
-  15000,
-  20000,
-  50000,
-  100000,
-]
+# TRACE_COUNTS = [
+#   250,
+#   500,
+#   750,
+#   1000,
+#   1250,
+#   1500,
+#   1750,
+#   2000,
+#   2500,
+#   3000,
+#   3500,
+#   4000,
+#   5000,
+#   7500,
+#   10000,
+#   15000,
+#   20000,
+#   50000,
+#   100000,
+# ]
+TRACE_COUNTS = list(range(250, 3001))
+# TRACE_COUNTS = list(range(1972, 2200))
+
 
 # Randomization makes the trace-count experiment reproducible.
 # N traces are selected as the first N traces of this fixed
@@ -760,6 +763,8 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
 
   first_full_recovery = None
 
+  consecutive_full_recovery = 0
+
   # --------------------------------------------------------
   # Check only N values which exist
   # --------------------------------------------------------
@@ -841,11 +846,20 @@ def characterize_trace_count(ciphertexts, traces, reference_key):
     winner_matrix.append(winners.copy())
 
     # ----------------------------------------------------
-    # First successful point
+    # Stop after 50 consecutive full-recovery points
     # ----------------------------------------------------
 
-    if full_recovery and first_full_recovery is None:
-      first_full_recovery = N
+    if full_recovery:
+      consecutive_full_recovery += 1
+      if first_full_recovery is None:
+        first_full_recovery = N
+      print(f"[+] Worst rank reached 1 at N = {N} traces")
+      print(f"[+] Recovered key at this trace count: {winner_hex}")
+      if consecutive_full_recovery == 50:
+        print("[+] Worst rank was 1 for 50 consecutive trace counts; stopping sweep.")
+        break
+    else:
+      consecutive_full_recovery = 0
 
   # ========================================================
   # Convert results

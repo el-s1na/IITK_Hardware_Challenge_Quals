@@ -1,16 +1,11 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from pathlib import Path
 
 
 CSV_PATH = Path("Round10_traces.csv")
 
 N_TRACES = 10000
-
-SAVE_PLOTS = True
-PLOT_DIR = Path("correlation_plots")
-
 
 INV_SBOX = np.array(
   [
@@ -465,46 +460,6 @@ def cpa_one_byte(ciphertexts, traces, byte_index):
 
 
 # ============================================================
-# Plot correlation for one byte
-# ============================================================
-
-
-def plot_byte_correlation(correlation, winner, peak_sample, byte_index, output_dir):
-  plt.figure(figsize=(10, 5))
-
-  x = np.arange(correlation.shape[1])
-
-  # Plot wrong candidates lightly
-  for k in range(256):
-    if k != winner:
-      plt.plot(x, correlation[k], linewidth=0.5, alpha=0.15)
-
-  # Highlight winner
-  plt.plot(x, correlation[winner], linewidth=2.0, label=f"winner = 0x{winner:02X}")
-
-  plt.axvline(
-    peak_sample, linestyle="--", linewidth=1.0, label=f"peak sample = {peak_sample}"
-  )
-
-  plt.xlabel("Sample index")
-  plt.ylabel("Pearson correlation")
-  plt.title(f"Byte {byte_index}: fake-key CPA (candidate 0x{winner:02X})")
-
-  plt.grid(True, alpha=0.25)
-  plt.legend()
-  plt.tight_layout()
-
-  output_dir.mkdir(parents=True, exist_ok=True)
-
-  output_file = output_dir / f"byte_{byte_index:02d}.png"
-
-  plt.savefig(output_file, dpi=150)
-  plt.close()
-
-  print(f"    saved {output_file}")
-
-
-# ============================================================
 # Main attack
 # ============================================================
 
@@ -543,9 +498,6 @@ def main():
       sample = np.argmax(np.abs(correlation[k]))
 
       print(f"      #{rank}: 0x{k:02X} |corr|={peak:.6f} sample={sample}")
-
-    if SAVE_PLOTS:
-      plot_byte_correlation(correlation, winner, peak_sample, byte_index, PLOT_DIR)
 
   # --------------------------------------------------------
   # Print recovered 16-byte fake key
