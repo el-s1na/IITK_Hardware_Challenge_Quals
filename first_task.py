@@ -5,7 +5,7 @@ from pathlib import Path
 
 CSV_PATH = Path("Round10_traces.csv")
 
-N_TRACES = 10000
+N_TRACES = 100000
 
 INV_SBOX = np.array(
   [
