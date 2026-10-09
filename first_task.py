@@ -5,8 +5,6 @@ from pathlib import Path
 
 CSV_PATH = Path("Round10_traces.csv")
 
-N_TRACES = 100000
-
 INV_SBOX = np.array(
   [
     0x52,
@@ -270,193 +268,53 @@ INV_SBOX = np.array(
 )
 
 
-# ============================================================
-# AES ShiftRows inverse mapping
-#
-# Standard AES column-major byte numbering:
-#
-#       0  4  8 12
-#       1  5  9 13
-#       2  6 10 14
-#       3  7 11 15
-#
-# C[INV_SR[i]] corresponds to the state byte before ShiftRows.
-#
-# IMPORTANT:
-# The README gives INV_SR symbolically but does not print
-# the array itself, so this assumes standard AES byte ordering.
-# ============================================================
-
 INV_SR = np.array(
   [0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11], dtype=np.int64
 )
-
-
-# ============================================================
-# Hamming-weight lookup table
-# ============================================================
-
 HW = np.array([x.bit_count() for x in range(256)], dtype=np.uint8)
 
 
-# ============================================================
-# Load CSV
-# ============================================================
-
-
-def load_dataset(csv_path: Path, n_traces=None):
+def load_dataset(csv_path: Path):
   if not csv_path.exists():
-    raise FileNotFoundError(
-      f"Could not find {csv_path.resolve()}\n"
-      f"Put Round10_traces.csv in the same directory as this script."
-    )
+    raise FileNotFoundError(f"Could not find {csv_path.resolve()}")
 
-  print(f"[+] Loading {csv_path} ...")
-
-  df = pd.read_csv(csv_path, header=None)
-
-  print(f"[+] Raw CSV shape: {df.shape}")
-
+  df = pd.read_csv(csv_path, header=None, dtype={0: str})
   if df.shape[1] != 201:
     raise ValueError(f"Expected 201 columns, got {df.shape[1]}")
 
-  if n_traces is not None:
-    df = df.iloc[:n_traces]
-
-  # Column 0 = 32 hex characters = 16 bytes
-  ciphertext_hex = df.iloc[:, 0].astype(str)
-
-  ciphertexts = np.fromiter(
-    (byte for value in ciphertext_hex for byte in bytes.fromhex(value)), dtype=np.uint8
-  )
-
-  ciphertexts = ciphertexts.reshape(len(df), 16)
-
-  # Columns 1..200 = power samples
+  ciphertexts = np.frombuffer(
+    b"".join(bytes.fromhex(value.strip()) for value in df.iloc[:, 0]),
+    dtype=np.uint8,
+  ).reshape(-1, 16)
   traces = df.iloc[:, 1:].to_numpy(dtype=np.float64)
-
-  print(f"[+] Ciphertexts shape: {ciphertexts.shape}")
-  print(f"[+] Traces shape:      {traces.shape}")
-
-  if traces.shape[1] != 200:
-    raise ValueError(f"Expected 200 trace samples, got {traces.shape[1]}")
-
   return ciphertexts, traces
 
 
-# ============================================================
-# CPA for one byte
-# ============================================================
-
-
 def cpa_one_byte(ciphertexts, traces, byte_index):
-  """
-  Recover one fake-key byte using the challenge's model:
-
-      HD_i[k] =
-          HW(
-              InvSBox[C[i] XOR k]
-              XOR
-              C[INV_SR[i]]
-          )
-
-  Returns:
-      correlation : (256, 200)
-      scores      : (256,)
-      winner      : integer 0..255
-      peak_sample : integer 0..199
-  """
-
-  n = len(ciphertexts)
-
+  """Rank key-byte guesses using HD=HW(InvSBox(C[i]^k)^C[INV_SR[i]])."""
   c_i = ciphertexts[:, byte_index]
   c_other = ciphertexts[:, INV_SR[byte_index]]
-
-  # --------------------------------------------------------
-  # Center traces once.
-  #
-  # traces_centered[:, t] =
-  #       P[:,t] - mean(P[:,t])
-  # --------------------------------------------------------
-
   traces_centered = traces - traces.mean(axis=0)
-
-  # ||P_t - mean(P_t)|| for each sample t
   trace_norms = np.sqrt(np.sum(traces_centered * traces_centered, axis=0))
 
-  correlation = np.zeros((256, traces.shape[1]), dtype=np.float64)
+  scores = np.zeros(256, dtype=np.float64)
+  peak_samples = np.zeros(256, dtype=np.int64)
 
-  for k in range(256):
-    # ----------------------------------------------------
-    # Step 1:
-    #
-    # C[i] XOR k
-    # ----------------------------------------------------
-
-    x = c_i ^ np.uint8(k)
-
-    # ----------------------------------------------------
-    # Step 2:
-    #
-    # InvSBox[C[i] XOR k]
-    # ----------------------------------------------------
-
-    inv_sbox_value = INV_SBOX[x]
-
-    # ----------------------------------------------------
-    # Step 3:
-    #
-    # InvSBox[...] XOR C[INV_SR[i]]
-    # ----------------------------------------------------
-
-    hd_input = inv_sbox_value ^ c_other
-
-    # ----------------------------------------------------
-    # Step 4:
-    #
-    # Hamming weight
-    #
-    # This gives one predicted leakage value per trace.
-    # ----------------------------------------------------
-
+  for key_guess in range(256):
+    hd_input = INV_SBOX[c_i ^ np.uint8(key_guess)] ^ c_other
     h = HW[hd_input].astype(np.float64)
-
-    # Center hypothesis
     h_centered = h - h.mean()
-
     h_norm = np.sqrt(np.sum(h_centered * h_centered))
-
     if h_norm == 0:
       continue
 
-    # ----------------------------------------------------
-    # Step 5:
-    #
-    # Pearson correlation against ALL 200 samples.
-    #
-    # Numerator:
-    #
-    #       sum_j H_j * P_j(t)
-    #
-    # after centering.
-    # ----------------------------------------------------
-
-    numerator = h_centered @ traces_centered
-
-    denominator = h_norm * trace_norms
-
-    correlation[k] = numerator / denominator
-
-  # The challenge explicitly says to use the highest
-  # absolute correlation peak.
-  scores = np.max(np.abs(correlation), axis=1)
+    correlations = (h_centered @ traces_centered) / (h_norm * trace_norms)
+    absolute_correlations = np.abs(correlations)
+    scores[key_guess] = absolute_correlations.max()
+    peak_samples[key_guess] = absolute_correlations.argmax()
 
   winner = int(np.argmax(scores))
-
-  # Sample where winning key reaches maximum |correlation|
-  peak_sample = int(np.argmax(np.abs(correlation[winner])))
-
-  return correlation, scores, winner, peak_sample
+  return scores, winner, int(peak_samples[winner])
 
 
 # ============================================================
@@ -465,61 +323,20 @@ def cpa_one_byte(ciphertexts, traces, byte_index):
 
 
 def main():
-
-  ciphertexts, traces = load_dataset(CSV_PATH, N_TRACES)
-
-  fake_key = []
-
-  print()
-  print("=" * 70)
-  print("Starting final-round CPA")
-  print("=" * 70)
+  ciphertexts, traces = load_dataset(CSV_PATH)
+  fake_key = np.zeros(16, dtype=np.uint8)
 
   for byte_index in range(16):
-    print()
-    print(f"[+] Attacking byte {byte_index}")
-
-    correlation, scores, winner, peak_sample = cpa_one_byte(
+    scores, winner, peak_sample = cpa_one_byte(
       ciphertexts, traces, byte_index
     )
+    fake_key[byte_index] = winner
+    print(
+      f"byte {byte_index:02d}: key=0x{winner:02x}, "
+      f"|correlation|={scores[winner]:.6f}, sample={peak_sample}"
+    )
 
-    fake_key.append(winner)
-
-    print(f"    Winner       : 0x{winner:02X}")
-    print(f"    Peak sample  : {peak_sample}")
-    print(f"    Peak |corr|  : {scores[winner]:.6f}")
-
-    # Show top 5 candidates
-    best = np.argsort(scores)[::-1][:5]
-
-    print("    Top candidates:")
-    for rank, k in enumerate(best, start=1):
-      peak = scores[k]
-      sample = np.argmax(np.abs(correlation[k]))
-
-      print(f"      #{rank}: 0x{k:02X} |corr|={peak:.6f} sample={sample}")
-
-  # --------------------------------------------------------
-  # Print recovered 16-byte fake key
-  # --------------------------------------------------------
-
-  fake_key_hex = "".join(f"{byte:02X}" for byte in fake_key)
-
-  print()
-  print("=" * 70)
-  print("RECOVERED FAKE ROUND-10 KEY")
-  print("=" * 70)
-  print(fake_key_hex)
-  print()
-
-  print("Byte-wise:")
-  for i, byte in enumerate(fake_key):
-    print(f"  byte {i:2d}: 0x{byte:02X}")
-
-  print()
-  print("=" * 70)
-  print("Done.")
-  print("=" * 70)
+  print(f"Fake round-10 key: {fake_key.tobytes().hex()}")
 
 
 if __name__ == "__main__":
