@@ -432,14 +432,14 @@ def save_endpoint_correlation_plots(
                     continue
                 axis.plot(
                     sample_indices,
-                    correlations[z, round_index, byte],
+                    np.abs(correlations[z, round_index, byte]),
                     color="gray",
                     alpha=0.12,
                     linewidth=0.45,
                 )
             axis.plot(
                 sample_indices,
-                correlations[selected_z, round_index, byte],
+                np.abs(correlations[selected_z, round_index, byte]),
                 color="crimson",
                 linewidth=1.5,
                 label=f"z=0x{selected_z:02x} (selected)",
@@ -455,7 +455,7 @@ def save_endpoint_correlation_plots(
             axis.set_title(
                 f"Round {round_index + 1}, event sample {event_samples[round_index]}"
             )
-            axis.set_ylabel("Pearson r")
+            axis.set_ylabel("Absolute Pearson |r|")
             axis.grid(alpha=0.2)
         for axis in axes[-1, :]:
             axis.set_xlabel("Trace sample")
