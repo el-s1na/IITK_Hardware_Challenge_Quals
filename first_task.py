@@ -317,19 +317,12 @@ def cpa_one_byte(ciphertexts, traces, byte_index):
   return scores, winner, int(peak_samples[winner])
 
 
-# ============================================================
-# Main attack
-# ============================================================
-
-
 def main():
   ciphertexts, traces = load_dataset(CSV_PATH)
   fake_key = np.zeros(16, dtype=np.uint8)
 
   for byte_index in range(16):
-    scores, winner, peak_sample = cpa_one_byte(
-      ciphertexts, traces, byte_index
-    )
+    scores, winner, peak_sample = cpa_one_byte(ciphertexts, traces, byte_index)
     fake_key[byte_index] = winner
     print(
       f"byte {byte_index:02d}: key=0x{winner:02x}, "

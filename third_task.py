@@ -2,11 +2,12 @@
 """Task 3: derive timing from trace activity and scan round-10 key candidates.
 
 First, it detects activity samples from across-trace variance without key
-guesses or a preset sample spacing. It then scans all missing-endpoint key
-candidates using transition HD, HW(S[r-1] XOR S[r]), at those detected samples.
-The result assumes the ten strongest local variance peaks correspond to AES
-round events and depends on the shared missing-endpoint and leakage hypotheses.
-The recovered RK10 is used directly by fourth_task.py.
+guesses or a preset sample spacing. It then scores all missing-endpoint key
+candidates by their mean absolute Pearson correlation between predicted
+transition Hamming weights and trace values at the detected round samples.
+The result assumes the strongest local variance peaks correspond to AES round
+events and depends on the shared missing-endpoint and leakage hypotheses. The
+recovered RK10 is used directly by fourth_task.py.
 """
 
 from pathlib import Path
@@ -405,23 +406,15 @@ def inverse_round(state, rk):
     return INV_SBOX[shifted]
 
 
-def fit_gain(htr, ytr, hte, yte):
-    """Fit centered multivariate leakage on train; score it on held-out rows."""
-    hm, ym = htr.mean(axis=0), ytr.mean(axis=0)
-    htrc, ytrc = htr - hm, ytr - ym
-    htec, ytec = hte - hm, yte - ym
-    gram = htrc.T @ htrc
-    cross = htrc.T @ ytrc
-    beta = np.linalg.pinv(gram) @ cross
-    ptr, pte = htrc @ beta, htec @ beta
-    gtr = (2 * (ytrc * ptr).sum() - (ptr * ptr).sum()) / (ytrc * ytrc).sum()
-    gte = (2 * (ytec * pte).sum() - (pte * pte).sum()) / (ytec * ytec).sum()
-    return (
-        float(gtr),
-        float(gte),
-        float((ytrc * ytrc).sum()),
-        float((ytec * ytec).sum()),
+def pearson_by_feature(features, centered_measurements, measurement_sumsquares):
+    """Correlate each feature with measurements centered once across all traces."""
+    features_centered = features - features.mean(axis=0)
+    numerator = features_centered.T @ centered_measurements
+    denominator = np.sqrt(
+        (features_centered * features_centered).sum(axis=0)[:, None]
+        * measurement_sumsquares[None, :]
     )
+    return numerator / np.maximum(denominator, 1e-20)
 
 
 def save_endpoint_correlation_plots(
@@ -470,7 +463,7 @@ def save_endpoint_correlation_plots(
         fig.suptitle(
             f"Endpoint candidates across rounds 1–8 — byte {byte:02d} "
             f"(RK10=0x{rk10[byte]:02x})\n"
-            "Gray: other z candidates; red: selected global regression candidate"
+            "Gray: other z candidates; red: z=0xff"
         )
         fig.tight_layout(rect=(0, 0, 1, 0.94))
         output_path = output_dir / f"byte_{byte:02d}.png"
@@ -511,109 +504,62 @@ def main():
         )
     print(
         "The histogram identifies absent ciphertext outputs; the 256-way "
-        "transition scan resolves the endpoint under its leakage model."
+        "correlation scan ranks endpoint candidates under the leakage model."
     )
     keep = np.all(ct_all != doubled[None, :], axis=1)
-    row_ids = np.flatnonzero(keep)
     ct, traces = ct_all[keep], tr_all[keep]
-    training_winners = []
-    event_samples = []
-    endpoint_correlations = np.empty((256, 8, 16, traces.shape[1]), dtype=np.float32)
     centered_traces = traces - traces.mean(axis=0)
     trace_sumsquares = (centered_traces * centered_traces).sum(axis=0)
-    for fold, train_first in enumerate((True, False), 1):
-        train = np.flatnonzero((row_ids < 50_000) == train_first)
-        test = np.flatnonzero((row_ids < 50_000) != train_first)
-        activity_samples, activity_variance = find_round_activity_samples(
-            traces[train], rounds=10
-        )
-        print(
-            f"fold {fold} round activity samples discovered from training "
-            f"trace variation: {activity_samples.tolist()}"
-        )
-        print(
-            "  across-trace variance at events:",
-            [round(float(activity_variance[t]), 10) for t in activity_samples],
-        )
-        # The first nine detected events are ordinary rounds 1..9. The tenth
-        # is the protected final round, excluded from the ordinary-round HD fit.
-        round_samples = activity_samples[:9]
-        event_samples.append(round_samples[:8])
-        candidate_results = []
-        for m in range(256):
-            rk10 = missing ^ SBOX[m]
-            master = invert_aes128_rk10(rk10.tobytes())
-            rks = [np.frombuffer(k, dtype=np.uint8) for k in expand_aes128(master)]
-            s9, s8 = invert_to_round8(ct, rks[10], rks[9])
-            states = {9: s9, 8: s8}
-            for r in range(8, 0, -1):
-                states[r - 1] = inverse_round(states[r], rks[r])
+    endpoint_correlations = np.empty((256, 8, 16, traces.shape[1]), dtype=np.float32)
+    activity_samples, activity_variance = find_round_activity_samples(traces, rounds=10)
+    print(
+        "round activity samples from across-trace variance:",
+        activity_samples.tolist(),
+    )
+    print(
+        "  across-trace variance at events:",
+        [round(float(activity_variance[t]), 10) for t in activity_samples],
+    )
+    round_samples = activity_samples[:8]
 
-            round_scores = []
-            for r in range(1, 10):
-                h = HW[states[r - 1] ^ states[r]]
-                sample = int(round_samples[r - 1])
-                y = traces[:, sample]
-                gt, ge, et, ee = fit_gain(h[train], y[train], h[test], y[test])
-                round_scores.append((gt, ge, et, ee, sample))
-                if fold == 1 and r <= 8:
-                    h_centered = h - h.mean(axis=0)
-                    denominator = np.sqrt(
-                        (h_centered * h_centered).sum(axis=0)[:, None]
-                        * trace_sumsquares[None, :]
-                    )
-                    endpoint_correlations[m, r - 1] = (
-                        h_centered.T @ centered_traces
-                    ) / np.maximum(denominator, 1e-20)
-            train8 = sum(a * et for a, _, et, _, _ in round_scores[:8]) / sum(
-                et for _, _, et, _, _ in round_scores[:8]
+    candidate_scores = []
+    for z in range(256):
+        rk10 = missing ^ SBOX[z]
+        master = invert_aes128_rk10(rk10.tobytes())
+        round_keys = [
+            np.frombuffer(key, dtype=np.uint8) for key in expand_aes128(master)
+        ]
+        s9, s8 = invert_to_round8(ct, round_keys[10], round_keys[9])
+        states = {9: s9, 8: s8}
+        for r in range(8, 0, -1):
+            states[r - 1] = inverse_round(states[r], round_keys[r])
+
+        event_correlations = []
+        for r, sample in enumerate(round_samples, 1):
+            transitions = HW[states[r - 1] ^ states[r]]
+            correlations = pearson_by_feature(
+                transitions, centered_traces, trace_sumsquares
             )
-            test8 = sum(b * ee for _, b, _, ee, _ in round_scores[:8]) / sum(
-                ee for _, _, _, ee, _ in round_scores[:8]
-            )
-            candidate_results.append((m, round_scores, train8, test8))
+            endpoint_correlations[z, r - 1] = correlations
+            event_correlations.extend(np.abs(correlations[:, sample]))
+        candidate_scores.append((z, float(np.mean(event_correlations))))
 
-        by_train = sorted(candidate_results, key=lambda x: x[2], reverse=True)
-        by_test = sorted(candidate_results, key=lambda x: x[3], reverse=True)
-        ff = next(r for r in candidate_results if r[0] == 0xFF)
-        ff_train_rank = next(i + 1 for i, r in enumerate(by_train) if r[0] == 0xFF)
-        ff_test_rank = next(i + 1 for i, r in enumerate(by_test) if r[0] == 0xFF)
-        train_winner = by_train[0]
-        training_winners.append(train_winner[0])
-        print(f"fold {fold}: train/test={len(train)}/{len(test)}")
-        print(
-            f"  training-selected endpoint (rounds 1-8): "
-            f"z=0x{train_winner[0]:02x}, gain={train_winner[2]:+.6f}; "
-            f"held-out gain={train_winner[3]:+.6f}"
-        )
-        print(
-            f"  z=ff rank={ff_train_rank}/256 on training, "
-            f"{ff_test_rank}/256 held out; "
-            f"gain={ff[2]:+.6f}/{ff[3]:+.6f}"
-        )
-        print(
-            "  z=ff per-round sample, training gain, held-out gain:",
-            [
-                (r, sample, round(train_gain, 6), round(test_gain, 6))
-                for r, (train_gain, test_gain, _, _, sample) in enumerate(ff[1], 1)
-            ],
-        )
-        print(
-            "  top held-out candidates:",
-            [(f"0x{x[0]:02x}", round(x[3], 6)) for x in by_test[:8]],
-        )
-
-    if training_winners[0] == training_winners[1]:
-        selected_z = training_winners[0]
-        selected_rk10 = missing ^ SBOX[selected_z]
-        print("Task 3 candidate agreed across both training halves:")
-        print(f"  z_missing=0x{selected_z:02x}")
-        print(f"  actual RK10 candidate={selected_rk10.tobytes().hex()}")
-        save_endpoint_correlation_plots(
-            root, endpoint_correlations, selected_rk10, event_samples[0], selected_z
-        )
-    else:
-        print("its over")
+    candidate_scores.sort(key=lambda item: item[1], reverse=True)
+    selected_z, selected_score = candidate_scores[0]
+    selected_rk10 = missing ^ SBOX[selected_z]
+    ff_rank = next(i + 1 for i, item in enumerate(candidate_scores) if item[0] == 0xFF)
+    ff_score = next(score for z, score in candidate_scores if z == 0xFF)
+    print("Candidate ranking by mean absolute event-sample correlation:")
+    print(f"  selected z=0x{selected_z:02x}, mean |r|={selected_score:.6f}")
+    print(f"  z=0xff rank={ff_rank}/256, mean |r|={ff_score:.6f}")
+    print(
+        "  top candidates:",
+        [(f"0x{z:02x}", round(score, 6)) for z, score in candidate_scores[:8]],
+    )
+    print(f"  RK10 candidate={selected_rk10.tobytes().hex()}")
+    save_endpoint_correlation_plots(
+        root, endpoint_correlations, selected_rk10, round_samples, selected_z
+    )
 
 
 if __name__ == "__main__":
