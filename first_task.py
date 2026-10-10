@@ -275,12 +275,8 @@ HW = np.array([x.bit_count() for x in range(256)], dtype=np.uint8)
 
 
 def load_dataset(csv_path: Path):
-  if not csv_path.exists():
-    raise FileNotFoundError(f"Could not find {csv_path.resolve()}")
 
   df = pd.read_csv(csv_path, header=None, dtype={0: str})
-  if df.shape[1] != 201:
-    raise ValueError(f"Expected 201 columns, got {df.shape[1]}")
 
   ciphertexts = np.frombuffer(
     b"".join(bytes.fromhex(value.strip()) for value in df.iloc[:, 0]),

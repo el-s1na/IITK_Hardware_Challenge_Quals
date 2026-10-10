@@ -303,7 +303,7 @@ def main():
     master = invert_aes128_rk10(ROUND10_KEY)
     recovered_round10 = expand_aes128(master)[10]
     if recovered_round10 != ROUND10_KEY:
-        raise RuntimeError("key-schedule round trip failed")
+        raise RuntimeError("key-schedule round trip failed must've been the wind")
 
     print(f"input round-10 key: {ROUND10_KEY.hex()}")
     print(f"recovered master key: {master.hex()}")
