@@ -18,12 +18,10 @@ In this we have to find out, the minimum number of traces required to calculate 
 
 ### Task 3 — actual round-10 key
 
-The Task 1 CPA returns the fake key, so it does not solve actual-key recovery. We first counted ciphertext values at each byte position and found one absent value and one doubled value. The relation between the doubled value and fake key is consistent with the countermeasure’s identity-initialized lookup table, but the histogram allows multiple missing-endpoint explanations.
+We have obtained fake key in Task1 and Minimum number of traces required to find the fake key in Task2. In this, we obtained the actual round10 key. According to the Readme doc, The final actual round10 key is changed to some FRK10 key so that the correlation plot will point to the fake key instead of the actual RK10 key. But all other round keys are same in both with and without countermeasures. 
 
-To distinguish those explanations, we formed all 256 round-10-key candidates from the absent ciphertext values and each possible missing S-box input. We reconstructed AES states for ordinary ciphertext rows and compared predicted round-transition Hamming distances with trace samples. The candidate scan fits on one half of the capture and scores on the other, then swaps halves. `z=0xff` ranked first in both directions, producing `d014f9a8c9ee2589e13f0cc8b6630ca6` as the actual round-10-key candidate.
-
-This conclusion depends on the shared-endpoint, standard-AES-row, and transition-leakage assumptions. Timing is derived from across-trace sample variance: `third_task.py` finds the ten strongest local activity peaks, and both training halves independently find samples 13, 17, 21, 25, 29, 33, 37, 41, 45, and 49. The four-sample spacing is observed after peak detection, not supplied to it. The histogram alone also supports `z=0`; the transition scan is the evidence that favors `z=0xff`. The script saves 16 per-byte plots under `actual_round10_correlation_plots/`. Each plot shows all 256 endpoint candidates' transition-HW correlations across all samples for rounds 1–8, with the regression winner highlighted. Details and evidence limits are in [TASK3_TASK4_METHOD.md](TASK3_TASK4_METHOD.md).
+One thing to note in task1 is that state register transitioned from FRK10 key to C( ciphertext) at time sample 49. If the time samples are continuos, and error free then there must be power traces recorded at each state transition. In simple terms, everytime Srminus1 transitions to Sr, there's more power consumed recorded than usual. 
 
 ### Task 4 — actual master key
 
-AES-128 key expansion can be inverted from the round-10 key. Inverting the Task 3 candidate gives `2b7e151628aed2a6abf7158809cf4f3c`, and expanding it reproduces the selected round-10 key. Task 4 is therefore an exact key-schedule step conditional on Task 3’s candidate; it does not independently resolve the missing-endpoint ambiguity.
+
