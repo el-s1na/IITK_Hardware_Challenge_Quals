@@ -22,6 +22,15 @@ We have obtained fake key in Task1 and Minimum number of traces required to find
 
 One thing to note in task1 is that state register transitioned from FRK10 key to C( ciphertext) at time sample 49. If the time samples are continuos, and error free then there must be power traces recorded at each state transition. In simple terms, everytime Srminus1 transitions to Sr, there's more power consumed recorded than usual. 
 
+But we have another problem, how to identify these activity bursts happening during the round transition. And Variance comes to the rescue. 
+TODO:mathematical equations regarding th3 variance 
+
+In variance_plot.png, we can see that there is around 9 local maxima before time sample 49, and at detected time sample
+
+TODO: explain mathematics behind z.
+
+
+
 ### Task 4 — actual master key
 
 
