@@ -46,6 +46,8 @@ M\_{b}=f\_{b}(z\_{b}) =SBox(z\_{b})⊕ RK10\_{b}.
 After assuming shared-z hypothesis, we come to the equation M\_{b}=SBox(z\_{b})⊕ RK10\_{b}.
 Now for every value of z from 0x0 to 0xff, we can calculate a different RK10, and from there we can find all the previous round keys. Using the leakage model hypothesis(same as Task1), we can find for which values of z, we can get the highest correlation at the detected time sample.
 
+At each time sample t, correlation plot is calculated across traces. To find the ranking of z, which suggests the highest correaltion, we have to take averagei.e. Score(z)
+
 
 TODO: Mathematical equations
 
