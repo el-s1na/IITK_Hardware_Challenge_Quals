@@ -1,21 +1,20 @@
-import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 
-CSV_FILE = "Round10_traces.csv"
+ROOT = Path(__file__).resolve().parents[1]
+CSV_FILE = ROOT / "Round10_traces.csv"
 
 TRACE_COUNTS = list(range(250, 3001))
 
 RANDOM_SEED = 0x5CA
 
-FULL_PLOT_DIR = "correlation_plots_full"
-TRACE_CHAR_CSV = "trace_characterisation.csv"
-RANK_PLOT = "rank_plot_all_bytes.png"
-WORST_RANK_PLOT = "worst_rank_plot.png"
-
-os.makedirs(FULL_PLOT_DIR, exist_ok=True)
+FULL_PLOT_DIR = ROOT / "correlation_plots_full"
+TRACE_CHAR_CSV = ROOT / "trace_characterisation.csv"
+RANK_PLOT = ROOT / "rank_plots" / "rank_plot_all_bytes.png"
+WORST_RANK_PLOT = ROOT / "worst_rank_plots" / "worst_rank_plot.png"
 
 
 AES_INV_SBOX = np.array(
@@ -412,6 +411,8 @@ def calculate_cpa_scores(ciphertexts, traces, byte_index):
 
 def full_data_attack(ciphertexts, traces):
 
+  FULL_PLOT_DIR.mkdir(parents=True, exist_ok=True)
+
   print("FULL-DATA FINAL-ROUND CPA")
 
   recovered_key = []
@@ -459,7 +460,7 @@ def full_data_attack(ciphertexts, traces):
 
     plt.tight_layout()
 
-    filename = os.path.join(FULL_PLOT_DIR, f"byte_{byte_index:02d}.png")
+    filename = FULL_PLOT_DIR / f"byte_{byte_index:02d}.png"
 
     plt.savefig(filename, dpi=150)
 
@@ -476,6 +477,9 @@ def full_data_attack(ciphertexts, traces):
 
 
 def characterize_trace_count(ciphertexts, traces, reference_key):
+
+  RANK_PLOT.parent.mkdir(parents=True, exist_ok=True)
+  WORST_RANK_PLOT.parent.mkdir(parents=True, exist_ok=True)
 
   print("TRACE-COUNT CHARACTERISATION")
   print()

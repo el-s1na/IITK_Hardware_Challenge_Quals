@@ -490,7 +490,7 @@ def load_capture(root):
 
 
 def main():
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     ct_all, tr_all = load_capture(root)
     counts = np.stack([np.bincount(ct_all[:, b], minlength=256) for b in range(16)])
     missing = counts.argmin(axis=1).astype(np.uint8)

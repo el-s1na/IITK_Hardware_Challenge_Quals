@@ -3,7 +3,8 @@ import pandas as pd
 from pathlib import Path
 
 
-CSV_PATH = Path("Round10_traces.csv")
+ROOT = Path(__file__).resolve().parents[1]
+CSV_PATH = ROOT / "Round10_traces.csv"
 
 INV_SBOX = np.array(
   [

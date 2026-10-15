@@ -20,7 +20,7 @@ def load_capture(csv_path):
 
 
 def main():
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     _, traces = load_capture(root / "Round10_traces.csv")
 
     centered = traces - traces.mean(axis=0)
@@ -118,7 +118,8 @@ def main():
     )
     fig.tight_layout(rect=(0, 0.09, 1, 1))
 
-    output = root / "variance_plot.png"
+    output = root / "variance_plots" / "variance_plot.png"
+    output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=180)
     print(f"Plot saved to: {output}")
 

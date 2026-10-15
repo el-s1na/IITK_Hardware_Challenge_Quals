@@ -53,7 +53,7 @@ Figure~\ref{fig:variance} gives the variance profile used to locate round activi
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.92\textwidth]{variance_plot.png}
+\includegraphics[width=0.92\textwidth]{variance_plots/variance_plot.png}
 \caption{Across-trace variance over the 200-sample capture. The selected local maxima indicate candidate activity times.}
 \label{fig:variance}
 \end{figure*}
@@ -123,7 +123,7 @@ The capture in \texttt{Round10\_traces.csv} contains 100,000 records. Each recor
 
 Task 2 uses NumPy's pseudorandom generator with seed \texttt{0x5CA} to permute the trace rows once. The fixed seed the shuffled ordering so that repeated runs use the same subsets and reproduce the experiment. This seed has no cryptographic value and does not affect the retrieval of the key, although different orderings can change the trace count required for recovery. It tests increasing prefixes, beginning at 250 traces, and records the rank of each byte of the full-data Task 1 key. The tested trace count stops after the worst byte rank has remained one for 100 consecutive counts, showing that the worst rank increases even after it has achieved the minimum value.
 
-The scripts used for the analysis are \texttt{first\_task.py}, \texttt{second\_task.py}, \texttt{third\_task.py}, and \texttt{fourth\_task.py}. The trace count plots and table are saved in \texttt{rank\_plot\_all\_bytes.png}, \texttt{worst\_rank\_plot.png}, and \texttt{trace\_characterisation.csv}. Task 3 writes byte-wise candidate correlation plots to \texttt{actual\_round10\_correlation\_plots/}.
+The analysis scripts are in \texttt{task\_solution/}: \texttt{first\_task.py}, \texttt{second\_task.py}, \texttt{third\_task.py}, and \texttt{fourth\_task.py}. Task 2 saves its rank plots in \path{rank_plots/rank_plot_all_bytes.png} and \path{worst_rank_plots/worst_rank_plot.png}, and its table in \path{trace_characterisation.csv}. Task 3 writes byte-wise candidate correlation plots to \texttt{actual\_round10\_correlation\_plots/}. The variance plotting script, \path{task_solution/variance_plot.py}, saves its output in \path{variance_plots/variance_plot.png}.
 
 \section{Methodology}
 \subsection{Task 1: Fake Round-10 Key Recovery}
@@ -209,14 +209,14 @@ In the saved characterization, the first tested prefix with rank one for all 16 
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.86\textwidth]{worst_rank_plot.png}
+\includegraphics[width=0.86\textwidth]{worst_rank_plots/worst_rank_plot.png}
 \caption{Worst reference-key-byte rank as the number of traces increases. Rank one means all 16 reference bytes rank first.}
 \label{fig:task2-worst-rank}
 \end{figure*}
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.92\textwidth]{rank_plot_all_bytes.png}
+\includegraphics[width=0.92\textwidth]{rank_plots/rank_plot_all_bytes.png}
 \caption{Reference-key-byte ranks across the tested trace counts.}
 \label{fig:task2-byte-ranks}
 \end{figure*}
