@@ -37,4 +37,40 @@ So now we calculate the HD between Sr-1 to Sr and using CPA, we can plot the cor
 
 ### Task 4 — actual master key
 
-@Entity069
+We have obtained the actual round-10 key in Task 3. Since the AES-128 key schedule is reversible, we can use this round key to calculate the initial AES master key. In fourth_task.py, we start with the round-10 key `d014f9a8c9ee2589e13f0cc8b6630ca6` and calculate the expanded key words backward.
+
+The AES-128 expanded key contains 44 words, each of 4 bytes, written as $w[0], w[1], \ldots, w[43]$. The first four words form the master key, while the last four words form the round-10 key. During forward expansion, each word is calculated using
+
+$$
+w[i] = w[i-4] \oplus F_i(w[i-1]).
+$$
+
+At every fourth word, $F_i$ applies RotWord, SubWord and the round constant. At all other positions, it leaves the input unchanged:
+
+$$
+F_i(x) =
+\begin{cases}
+\operatorname{SubWord}(\operatorname{RotWord}(x)) \oplus Rcon[i/4], & i \equiv 0 \pmod{4}, \\
+x, & \text{otherwise}.
+\end{cases}
+$$
+
+Here, RotWord moves the first byte to the end of the four-byte word, and SubWord replaces each byte with its value from the forward AES S-box. The round constant is placed in the first byte of a four-byte word, with the remaining bytes set to zero.
+
+To calculate an earlier word, we XOR both sides of the forward equation with $F_i(w[i-1])$. Since XORing the same value twice cancels it, we get
+
+$$
+w[i-4] = w[i] \oplus F_i(w[i-1]).
+$$
+
+We place the recovered round-10 key into $w[40], \ldots, w[43]$, and run this calculation for $i=43, 42, \ldots, 4$. For example, the first step gives $w[39] = w[43] \oplus w[42]$. At each step, the words required on the right-hand side are already known. Continuing backward gives all the words down to $w[0]$.
+
+One thing to note is that reversing the key schedule still uses the forward S-box. We already know the input $w[i-1]$ to $F_i$, so we can calculate its output directly. The earlier word is then recovered using XOR, so we do not need the inverse S-box for this calculation.
+
+The round constants are used in reverse round order. At $i=40, 36, \ldots, 4$, their first bytes are `36, 1b, 80, 40, 20, 10, 08, 04, 02, 01` in hexadecimal. In fourth_task.py, the RCON list stores these constants in forward order with indexing starting at zero. Therefore, the script uses `RCON[i // 4 - 1]`; for example, $i=40$ selects entry 9, which is `0x36`.
+
+After reaching the first four words, we join $w[0], \ldots, w[3]$ in their original order to get the master-key candidate:
+
+`2b7e151628aed2a6abf7158809cf4f3c`
+
+To check the calculation, the script expands this master key forward and compares its round-10 key with the input from Task 3. The resulting round-10 key is `d014f9a8c9ee2589e13f0cc8b6630ca6`, which matches the input. This confirms that the backward and forward key-schedule calculations agree for the selected round key. The evidence that this is the device's actual key comes from the trace analysis in Task 3 and depends on the assumptions used there.
