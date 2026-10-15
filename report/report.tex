@@ -195,7 +195,7 @@ The full-data CPA selects the fake round-10 key
 \begin{equation*}
 \texttt{91\,de\,c0\,68\,e3\,fa\,ce\,45\,99\,ce\,38\,f4\,20\,86\,3a\,30}.
 \end{equation*}
-The winning peaks occur at sample 49 for most byte positions and at sample 50 for bytes 5 and 15. The per-byte peak absolute correlations range from approximately 0.119 to 0.178. Figure~\ref{fig:task1-example} shows byte 0 as an example; the remaining per-byte plots are supplied separately. The peak values are attack scores after searching 256 candidates over 200 samples, not statistical confidence bounds.
+The winning peaks occur at sample 49 for most byte positions and at sample 50 for bytes 5 and 15. The per-byte peak absolute correlations range from approximately 0.119 to 0.178. Figure~\ref{fig:task1-example} shows byte 0 as an example; Appendix~\ref{app:task1-plots} contains the plots for bytes 1 through 15. The peak values are attack scores after searching 256 candidates over 200 samples, not statistical confidence bounds.
 
 \begin{figure*}[t]
 \centering
@@ -229,7 +229,7 @@ The variance profile in Fig.~\ref{fig:variance} has ten selected local maxima at
 \texttt{d0\,14\,f9\,a8\,c9\,ee\,25\,89\,e1\,3f\,0c\,c8\,b6\,63\,0c\,a6}.
 \end{equation*}
 
-Figure~\ref{fig:task3-example} shows the candidate-correlation plots for byte 0 across rounds 1--8; the other 15 byte plots are supplied separately. These plots help inspect whether candidate peaks occur near the detected event samples. The numerical selection criterion is the aggregate score in Equation~\eqref{eq:endpoint-score}.
+Figure~\ref{fig:task3-example} shows the candidate-correlation plots for byte 0 across rounds 1--8; Appendix~\ref{app:task3-plots} contains the plots for bytes 1 through 15. These plots help inspect whether candidate peaks occur near the detected event samples. The numerical selection criterion is the aggregate score in Equation~\eqref{eq:endpoint-score}.
 
 \begin{figure*}[!t]
 \centering
@@ -276,6 +276,11 @@ Task 4 starts with the round-10 key that Task 3 selects for $z=\texttt{0xFF}$. O
 CPA over the final-round transition model recovers the fake round-10 key, and a rank characteristics shows how that reference key performs as the trace count grows. Ciphertext-frequency observations then provide a set of actual round-key candidates, while earlier-round transition correlations favor the shared endpoint $z=0\mathrm{xFF}$. Reversing the calculated RK10 derived from z values gives the corresponding master-key candidate. The fake key result follows directly from the stated CPA ranking; the actual-key result is shown probable by using correlation plots.
 
 \clearpage
+\onecolumn
+\appendices
+\input{appendix_plots}
+\clearpage
+\twocolumn
 \begin{thebibliography}{7}
 \raggedright
 \def\UrlBreaks{\do\/\do\.\do\-}
