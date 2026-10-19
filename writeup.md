@@ -29,11 +29,33 @@ One thing to note in task1 is that state register transitioned from FRK10 key to
 But we have another problem, how to identify these activity bursts happening during the round transition. And Variance comes to the rescue.
 TODO:mathematical equations regarding th3 variance
 
-In variance_plot.png, we can see that there is around 9 local maxima before time sample 49, and at detected time sample
+In variance_plot.png, we can see that there is around 9 local maxima before time sample 49, and at detected time sample blah blah...
 
-TODO: explain mathematics behind z.
 
-So now we calculate the HD between Sr-1 to Sr and using CPA, we can plot the correlation plot for all the possible value of z which is from 0x0 to 0xff. For z=0xff correlation plot produces a peak for round1 to round8, and at the detected time sample where there is local maxima in variance plot.
+It is mentioned in the readme doc that final ciphertext which is produced without any changes, so final equation is
+C\_{b}=SBox(z\_{b})⊕ RK10\_{b} where z_b is the Sbox input that ShiftRows routes to ciphertext position b.
+
+After observing histogram, we found that for every byte position there is a byte value that never appears i.e. M_b and there is a byte value which appears more than normal which is D_b. And there is a relation between D_b and F_b(fake key obtained in task1) which is
+D\_{b}⊕ F\_{b}=SBox(0). The most alien observation here is that for every byte position of D_b and F_b, there is only input in Sbox.
+
+C\_{i,b}=f\_{b}(X\_{i,b}),  f\_{b}(x)=SBox(x)⊕ RK10\_{b}
+The histogram says M\_{b} never appears among the observed C\_{i,b} values. Since f\_{b} is one-to-one and maps all 256 byte inputs to all 256 byte outputs, there is a unique input z\_{b} that would produce M\_{b}
+
+M\_{b}=f\_{b}(z\_{b}) =SBox(z\_{b})⊕ RK10\_{b}.
+
+After assuming shared-z hypothesis, we come to the equation M\_{b}=SBox(z\_{b})⊕ RK10\_{b}.
+Now for every value of z from 0x0 to 0xff, we can calculate a different RK10, and from there we can find all the previous round keys. Using the leakage model hypothesis(same as Task1), we can find for which values of z, we can get the highest correlation at the detected time sample.
+
+At each time sample t, correlation plot is calculated across traces. To find the ranking of z, which suggests the highest correaltion, we have to take averagei.e. Score(z)
+
+
+TODO: Mathematical equations
+
+So for z=0xff at every round from 1 to 8, and at every byte position, there is a peak in absolute correlation plot, which is not present in the other cases.
+So this is highly likely that for z=0xff, the RK10 derived is the actual RK10 key.
+After that we can find the master key.
+
+
 
 ### Task 4 — actual master key
 
